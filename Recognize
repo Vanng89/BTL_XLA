@@ -1,0 +1,95 @@
+import cv2
+import numpy as np
+import serial
+import time
+import pyttsx3
+
+face_classifier = cv2.CascadeClassifier('C:/Users/5530 4k/Phan mem Nhan dien khuon mat/haarcascade_frontalface_default.xml')
+
+def speak(audio):
+    engine.say(audio)
+    engine.runAndWait()
+engine = pyttsx3.init('sapi5') #Speech Application Programming Interface
+voices = engine.getProperty('voices')
+engine.setProperty("voice", voices[0].id)
+engine.setProperty("rate", 140)
+engine.setProperty("volume", 1000)
+
+# Tải mô hình đã được huấn luyện
+model = cv2.face.LBPHFaceRecognizer_create()
+model.read("trainer/face-trainner.yml")
+
+def face_detector(img, size=0.5):
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    faces = face_classifier.detectMultiScale(gray, 1.3, 5)
+
+    if len(faces) == 0: #Dòng này kiểm tra xem có khuôn mặt nào được phát hiện hay không.
+        return img, [] #Nếu không có, hàm sẽ trả về ảnh gốc img và danh sách rỗng [].
+
+    for (x, y, w, h) in faces:
+        cv2.rectangle(img, (x, y), (x+w, y+h), (0, 255, 0), 2)
+        roi = img[y:y+h, x:x+w]
+        roi = cv2.resize(roi, (200, 200))
+
+    return img, roi
+
+cap = cv2.VideoCapture(0)
+x = 0  # Biến đếm số lượng khuôn mặt đã được nhận dạng trong mỗi khung hình từ video hoặc webcam
+c = 0  # Biến đếm số lượng khung hình mà không có khuôn mặt được nhận dạng
+d = 0  # Biến đếm số lượng khung hình mà có khuôn mặt được nhận dạng    m = 0  # Biến để theo dõi nhận dạng khuôn mặt thành công
+m = 0  # Biến để theo dõi nhận dạng khuôn mặt thành công
+
+while True:
+    ret, frame = cap.read()
+    image, face = face_detector(frame)
+
+    try:
+        face = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
+        result = model.predict(face)
+        if result[1] < 500:
+            confidence = int((1 - (result[1]) / 300) * 100)
+            display_string = str(confidence)
+            cv2.putText(image, display_string, (100, 120), cv2.FONT_HERSHEY_SCRIPT_COMPLEX, 1, (0, 255, 0))
+
+        if confidence >= 80:
+            cv2.putText(image, "UNLOCKED", (250, 450), 0, 1, (0, 255, 0), 2, cv2.LINE_AA)
+            cv2.imshow('face', image)
+            x += 1
+        else:
+            cv2.putText(image, "LOCKED", (250, 450), 0, 1, (0, 255, 0), 2, cv2.LINE_AA)
+            cv2.imshow('face', image)
+            c += 1
+    except:
+        cv2.putText(image, "FACE NOT FOUND", (250, 450), 0, 1, (0, 255, 0), 2, cv2.LINE_AA)
+        cv2.imshow('face', image)
+        d += 1
+        pass
+
+    if cv2.waitKey(1) == 13 or x == 10 or c == 30 or d == 20:
+        break
+
+cap.release()
+cv2.destroyAllWindows()
+
+if x >= 5:
+    m = 1
+    ard = serial.Serial('com6', 9600)
+    time.sleep(2)
+    var = 'a'
+    c = var.encode()
+    speak("Face recognition complete. Welcome back")
+    ard.write(c)
+    time.sleep(4)
+elif c == 30:
+    speak("Face is not matching. Please try again")
+elif d == 20:
+    speak("Face is not found. Please try again")
+
+if m == 1:
+    cap = cv2.VideoCapture(0)
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+
+    
