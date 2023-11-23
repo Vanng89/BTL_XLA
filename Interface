@@ -1,0 +1,228 @@
+import tkinter as tk
+from tkinter import ttk
+import numpy as np
+import os
+import sqlite3
+import cv2
+from PIL import Image,ImageTk
+import serial
+import time
+import pyttsx3
+
+###############PHẦN NHẬN DIỆN THỰC HIỆN CHỨC NĂNG###############
+def nhandien():
+    face_classifier = cv2.CascadeClassifier(
+        'C:/Users/5530 4k/Phan mem Nhan dien khuon mat/haarcascade_frontalface_default.xml')
+    # Định nghĩa hàm giọng nói để phát âm thanh từ văn bản nhập vào
+    def speak(audio):
+        engine.say(audio)
+        engine.runAndWait()
+
+    engine = pyttsx3.init('sapi5')
+    voices = engine.getProperty('voices')
+    engine.setProperty("voice", voices[0].id) # Lấy giọng mặc định đầu tiên trong danh sách có sẵn
+    engine.setProperty("rate", 140) # Tốc độ đọc 140 từ mỗi phút
+    engine.setProperty("volume", 1000) # Âm lượng giọng nói được đặt là 1000
+
+    # Tải mô hình đã được huấn luyện
+    model = cv2.face.LBPHFaceRecognizer_create()
+    model.read("trainer/face-trainner.yml")
+
+    def face_detector(img, size=0.5):
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        faces = face_classifier.detectMultiScale(gray, 1.3, 5)
+
+        if len(faces) == 0:
+            return img, []
+
+        for (x, y, w, h) in faces:
+            cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            roi = img[y:y + h, x:x + w]
+            roi = cv2.resize(roi, (200, 200))
+
+        return img, roi
+
+    cap = cv2.VideoCapture(0)
+    x = 0  # Biến đếm số lượng khuôn mặt đã được nhận dạng trong mỗi khung hình từ video hoặc webcam
+    c = 0  # Biến đếm số lượng khung hình mà không có khuôn mặt được nhận dạng
+    d = 0  # Biến đếm số lượng khung hình mà có khuôn mặt được nhận dạng    m = 0  # Biến để theo dõi nhận dạng khuôn mặt thành công
+    m = 0  # Biến để theo dõi nhận dạng khuôn mặt thành công
+    while True:
+        ret, frame = cap.read()
+        image, face = face_detector(frame)
+
+        try:
+            face = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
+            result = model.predict(face)
+            if result[1] < 500:
+                confidence = int((1 - (result[1]) / 300) * 100)
+                display_string = str(confidence)
+                cv2.putText(image, display_string, (100, 120), cv2.FONT_HERSHEY_SCRIPT_COMPLEX, 1, (0, 255, 0))
+
+            if confidence >= 80:
+                cv2.putText(image, "UNLOCKED", (250, 450), 0, 1, (0, 255, 0), 2, cv2.LINE_AA)
+                cv2.imshow('face', image)
+                x += 1
+            else:
+                cv2.putText(image, "LOCKED", (250, 450), 0, 1, (0, 255, 0), 2, cv2.LINE_AA)
+                cv2.imshow('face', image)
+                c += 1
+        except:
+            cv2.putText(image, "FACE NOT FOUND", (250, 450), 0, 1, (0, 255, 0), 2, cv2.LINE_AA)
+            cv2.imshow('face', image)
+            d += 1
+            pass
+
+        if cv2.waitKey(1) == 13 or x == 10 or c == 30 or d == 20:
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+# Giao tiếp với Arduino
+    if x >= 5:
+        m = 1
+        ard = serial.Serial('com6', 9600)
+        time.sleep(2)
+        var = 'a'
+        c = var.encode()
+        speak("Face recognition complete. Welcome back ")
+        ard.write(c)
+        time.sleep(100)
+    elif c == 30:
+        speak("Face is not matching. Please try again")
+    elif d == 20:
+        speak("Face is not found. Please try again")
+
+    if m == 1:
+        cap = cv2.VideoCapture(0)
+    cap.release()
+    cv2.destroyAllWindows()
+###########################################################################################################
+###############PHẦN TRAINING DỮ LIỆU###############
+def train():
+    recognizer = cv2.face_LBPHFaceRecognizer.create()
+    path = 'C:/Users/5530 4k/Phan mem Nhan dien khuon mat/data_face'
+
+    def getImagesWithID(path):
+        imagePaths = [os.path.join(path, f) for f in os.listdir(path)]
+        faces = []
+        IDs = []
+        for imagePath in imagePaths:
+            rgbImage = cv2.imread(imagePath)
+            grayImage = cv2.cvtColor(rgbImage, cv2.COLOR_BGR2GRAY)
+            faceNp = np.array(grayImage, 'uint8')
+            ID = int(os.path.split(imagePath)[-1].split('.')[1])
+            faces.append(faceNp)
+            IDs.append(ID)
+            cv2.imshow('Training', faceNp)
+            cv2.waitKey(10)
+        return np.array(IDs), faces
+
+    Ids, faces = getImagesWithID(path)
+    recognizer.train(faces, Ids)
+
+    if not os.path.exists('trainer'):
+        os.makedirs('trainer')
+
+    recognizer.save("trainer/face-trainner.yml")
+    cv2.destroyAllWindows()
+###########################################################################################################
+###############PHẦN LẤY DỮ LIỆU###############
+def laydulieu():
+    def insertOrUpdate(id, name):
+        conn =sqlite3.connect("FaceBase.db") #kết nối với db
+        query = "SELECT * FROM People WHERE ID="+str(id) #kiểm tra xem id đã tồn tại chưa
+        cursor = conn.execute(query) #trả về dữ liệu theo hàng
+        isRecordExist=0
+        for row in cursor:
+            isRecordExist=1
+        if isRecordExist==1:
+            query="UPDATE People SET Name="+str(name)+" WHERE ID="+str(id)
+        else:
+            query="INSERT INTO People(ID, Name) VALUES("+str(id)+","+str(name)+")"
+        conn.execute(query)
+        conn.commit()
+        conn.close()
+
+    face_cascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
+    cap = cv2.VideoCapture(0)
+    #id = input('Enter User ID: ')
+    #name = input('Enter Your Name: ')
+    id = int1.get()
+    name ="'"+str1.get()+"'"
+    insertOrUpdate(id, name)
+    sample_number = 0
+    while True:
+        ret, img = cap.read()
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+        for (x,y,w,h) in faces:
+            sample_number += 1
+
+            if not os.path.exists('data_face'):
+                os.makedirs('data_face')
+            cv2.imwrite('data_face/face_'+str(id)+"."+str(sample_number)+".jpg",  img[y:y+h,x:x+w])
+            cv2.rectangle(img, (x,y), (x+w, y+h), (0,255,0), 2) # ô xanh bao quanh mặt
+
+        cv2.imshow('WEDCAM', img)
+        cv2.waitKey(1);
+        if(sample_number>99):
+            cap.release()
+            cv2.destroyAllWindows()
+            break;
+    edit_id.delete(0,"end")
+    edit_name.delete(0,"end")
+###########################################################################################################
+###############PHẦN SETUP GIAO DIỆN PHẦN MỀM###############
+# Tạo cửa sổ giao diện
+win = tk.Tk()
+win.title("FACE ID")
+win.geometry('600x400')
+# Chèn backgroud cho giao diện
+image_path = "C:/Users/5530 4k/Phan mem Nhan dien khuon mat/faceid.png"
+image = Image.open(image_path) # Tạo một đối tượng hình ảnh từ tệp tin
+window_width = win.winfo_width() #Lấy kích thước của cửa sổ giao diện
+window_height = win.winfo_height()
+image = image.resize((600, 400), Image.ANTIALIAS if hasattr(Image, 'ANTIALIAS') else Image.BICUBIC) # Chỉnh kích thước hình ảnh để phù hợp với kích thước cửa sổ
+background_image = ImageTk.PhotoImage(image) # Tạo một đối tượng ImageTk từ đối tượng hình ảnh
+background_label = tk.Label(win, image=background_image) # Tạo một nhãn để chứa hình ảnh và thiết lập làm background
+background_label.place(x=0, y=0, relwidth=1, relheight=1)
+
+label = ttk.Label(win, text="HỆ THỐNG NHẬN DIỆN KHUÔN MẶT", background="white", foreground="black", font=("Arial", 13, "bold"))
+label.grid(column=1, row=0, pady=10)
+
+label1 = ttk.Label(win, text="ID:", background="black", foreground="white")
+label1.grid(column=0, row=1, pady=30)
+
+label2 = ttk.Label(win, text="NAME:", background="black", foreground="white")
+label2.grid(column=0, row=2, pady=8)
+#cài đặt nhập liệu
+int1 = tk.IntVar()
+edit_id = ttk.Entry(win, textvariable=int1, width=50)
+edit_id.grid(column=1, row=1)
+edit_id.delete(0, 'end')  # Xóa nội dung của ô văn bản
+edit_id.insert(0, '')    # Thêm nội dung trống vào ô văn bản
+edit_id.focus()
+
+str1 = tk.StringVar()
+edit_name = ttk.Entry(win, textvariable=str1, width=50)
+edit_name.grid(column=1, row=2)
+def enter(event):
+    edit_name.focus()
+edit_id.bind('<Return>', enter)
+
+#cài đặt các nút nhấn
+btlaydulieu = ttk.Button(win, text="Get Data", command=laydulieu)
+btlaydulieu.grid(column=0, row=3, pady=20)
+
+bttrain = ttk.Button(win, text="Training", command=train)
+bttrain.grid(column=1, row=3, pady=20)
+
+btnhandien = ttk.Button(win, text="Recognize", command=nhandien)
+btnhandien.grid(column=2, row=3, pady=20)
+
+win.columnconfigure(0, weight=1)
+win.columnconfigure(1, weight=1)
+win.columnconfigure(2, weight=1)
+
+win.mainloop()
